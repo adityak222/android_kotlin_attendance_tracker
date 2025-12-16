@@ -1,3 +1,4 @@
+```
 attendance-app/
 ├── app/
 │   ├── src/
@@ -12,7 +13,7 @@ attendance-app/
 │   │   │   │   │   │   │   └── FingerprintRegistrationScreen.kt
 │   │   │   │   │   │   ├── attendance/
 │   │   │   │   │   │   │   ├── MainAttendanceScreen.kt
-│   │   │   │   │   │   │   ├── PunchOutReasonDialog.kt
+│   │   │   │   │   │   │   ├── PunchOutReasonDialog.kt```
 │   │   │   │   │   │   │   ├── EmployeeInfoCard.kt
 │   │   │   │   │   │   │   └── TodayRecordsSection.kt
 │   │   │   │   │   │   ├── reports/
@@ -136,3 +137,4 @@ attendance-app/
 ├── settings.gradle.kts
 ├── gradle.properties
 └── README.md
+```
