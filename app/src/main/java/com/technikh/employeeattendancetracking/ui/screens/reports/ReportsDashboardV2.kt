@@ -1,11 +1,18 @@
 package com.technikh.employeeattendancetracking.ui.screens.dashboard
 
+import android.app.DatePickerDialog
+import android.widget.DatePicker
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,6 +27,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.Calendar
 import java.io.File
 import coil.compose.AsyncImage
 import com.technikh.employeeattendancetracking.data.database.AppDatabase
@@ -27,6 +35,7 @@ import com.technikh.employeeattendancetracking.data.database.entities.DailyAtten
 import com.technikh.employeeattendancetracking.data.database.entities.DayOfficeHours
 import com.technikh.employeeattendancetracking.data.database.entities.AttendanceRecord
 import com.technikh.employeeattendancetracking.viewmodel.AttendanceViewModelV2
+import com.technikh.employeeattendancetracking.utils.CsvUtils // <--- CSV Feature
 import com.patrykandpatrick.vico.compose.chart.Chart
 import com.patrykandpatrick.vico.compose.chart.column.columnChart
 import com.patrykandpatrick.vico.core.entry.ChartEntryModelProducer
@@ -60,14 +69,77 @@ fun ReportsDashboardV2(
     val dailyReportsState = viewModel.dailyReports.collectAsState(initial = emptyList())
     val monthlyReportState = viewModel.monthlyReport.collectAsState(initial = emptyList())
 
+
+    val currentMonthText by viewModel.currentMonthText.collectAsState()
+    val employeeName by viewModel.currentEmployeeName.collectAsState()
+
+
+    val calendar = Calendar.getInstance()
+    val datePickerDialog = DatePickerDialog(
+        context,
+        { _: DatePicker, year: Int, month: Int, day: Int ->
+            val newDate = Calendar.getInstance()
+            newDate.set(year, month, day)
+            viewModel.setDate(newDate.timeInMillis)
+        },
+        calendar.get(Calendar.YEAR),
+        calendar.get(Calendar.MONTH),
+        calendar.get(Calendar.DAY_OF_MONTH)
+    )
+
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Attendance Reports") })
+            TopAppBar(
+                title = { Text("Attendance Reports") },
+                actions = {
+                    IconButton(onClick = {
+
+                        val allRecords = dailyReportsState.value.flatMap { it.records }
+                        if (allRecords.isNotEmpty()) {
+                            CsvUtils.generateAndShareCsv(context, employeeName, allRecords)
+                        }
+                    }) {
+                        Icon(Icons.Default.Share, contentDescription = "Export CSV")
+                    }
+                }
+            )
         }
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
 
             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp)
+                        .background(MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium)
+                        .padding(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(onClick = { viewModel.changeMonth(-1) }) {
+                        Icon(Icons.Default.KeyboardArrowLeft, "Previous")
+                    }
+
+                    Text(
+                        text = currentMonthText,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Row {
+                        IconButton(onClick = { viewModel.changeMonth(1) }) {
+                            Icon(Icons.Default.KeyboardArrowRight, "Next")
+                        }
+                        IconButton(onClick = { datePickerDialog.show() }) {
+                            Icon(Icons.Default.DateRange, "Select Date")
+                        }
+                    }
+                }
+
+                // --- EXISTING TABS ---
                 var selectedTab by remember { mutableIntStateOf(0) }
                 TabRow(selectedTabIndex = selectedTab) {
                     listOf("Daily Report", "Monthly Chart").forEachIndexed { index, title ->
@@ -75,6 +147,7 @@ fun ReportsDashboardV2(
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+
                 when (selectedTab) {
                     0 -> DailyReportViewV2(dailyReportsState.value)
                     1 -> MonthlyReportViewV2(monthlyReportState.value)
@@ -94,11 +167,13 @@ fun ReportsDashboardV2(
     }
 }
 
+
+
 @Composable
 fun DailyReportViewV2(reports: List<DailyAttendance>) {
     if (reports.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No daily records found.")
+            Text("No daily records for this period.")
         }
         return
     }
@@ -127,12 +202,11 @@ fun DailyReportViewV2(reports: List<DailyAttendance>) {
                                 )
                                 Text(record.punchType, fontWeight = FontWeight.SemiBold)
 
-                                // --- FIX: SHOW SPECIFIC WORK REASON ---
                                 if (record.punchType == "OUT") {
                                     val displayText = if (record.isOfficeWork && !record.workReason.isNullOrBlank()) {
-                                        "${record.reason}: ${record.workReason}" // e.g. "Office Work: Coding"
+                                        "${record.reason}: ${record.workReason}"
                                     } else {
-                                        record.reason // e.g. "Personal"
+                                        record.reason
                                     }
 
                                     if (!displayText.isNullOrBlank()) {
@@ -145,7 +219,6 @@ fun DailyReportViewV2(reports: List<DailyAttendance>) {
                                     }
                                 }
                             }
-
 
                             if (record.selfiePath != null) {
                                 Card(

@@ -2,6 +2,7 @@ package com.technikh.employeeattendancetracking.ui.screens.login
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
@@ -9,6 +10,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.technikh.employeeattendancetracking.data.database.AppDatabase
@@ -29,19 +32,20 @@ fun RegisterEmployeeScreen(
         )
     )
 
-
     BackHandler {
         onRegistered()
     }
 
     var name by remember { mutableStateOf("") }
     var id by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.padding(32.dp)) {
             Text("Register New Employee", style = MaterialTheme.typography.headlineMedium)
 
             Spacer(Modifier.height(24.dp))
+
 
             OutlinedTextField(
                 value = name,
@@ -54,6 +58,7 @@ fun RegisterEmployeeScreen(
 
             Spacer(Modifier.height(16.dp))
 
+
             OutlinedTextField(
                 value = id,
                 onValueChange = { id = it },
@@ -63,12 +68,27 @@ fun RegisterEmployeeScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            Spacer(Modifier.height(16.dp))
+
+
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("Set User Password") },
+                placeholder = { Text("e.g. 1234") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(), // Hides text
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth()
+            )
+
             Spacer(Modifier.height(32.dp))
 
             Button(
                 onClick = {
-                    if (name.isNotBlank() && id.isNotBlank()) {
-                        viewModel.registerEmployee(name, id)
+                    // Check if password is also filled
+                    if (name.isNotBlank() && id.isNotBlank() && password.isNotBlank()) {
+                        viewModel.registerEmployee(name, id, password)
                         onRegistered()
                     }
                 },
@@ -77,7 +97,6 @@ fun RegisterEmployeeScreen(
                 Text("Save Employee")
             }
         }
-
 
         FloatingActionButton(
             onClick = onRegistered,

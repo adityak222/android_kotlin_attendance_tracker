@@ -8,6 +8,7 @@ import com.technikh.employeeattendancetracking.ui.screens.attendance.MainAttenda
 import com.technikh.employeeattendancetracking.ui.screens.dashboard.ReportsDashboardV2
 import com.technikh.employeeattendancetracking.ui.screens.login.LoginScreen
 import com.technikh.employeeattendancetracking.ui.screens.login.RegisterEmployeeScreen
+import com.technikh.employeeattendancetracking.ui.screens.settings.SettingsScreen
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -23,19 +24,19 @@ class MainActivity : FragmentActivity() {
                             currentEmployeeId = enteredId
                             currentScreen = "attendance"
                         },
-                        onNavigateToRegister = { currentScreen = "register" }
+                        onNavigateToRegister = { currentScreen = "register" },
+                        // --- CONNECT THE BUTTON HERE ---
+                        onNavigateToSettings = { currentScreen = "settings" }
                     )
                 }
+                // ... rest of the code remains the same ...
                 "register" -> {
-                    RegisterEmployeeScreen(
-                        onRegistered = { currentScreen = "login" }
-                    )
+                    RegisterEmployeeScreen(onRegistered = { currentScreen = "login" })
                 }
                 "attendance" -> {
                     MainAttendanceScreen(
                         employeeId = currentEmployeeId,
                         onNavigateToDashboard = { currentScreen = "reports" },
-
                         onNavigateHome = { currentScreen = "login" }
                     )
                 }
@@ -44,6 +45,9 @@ class MainActivity : FragmentActivity() {
                         employeeId = currentEmployeeId,
                         onBack = { currentScreen = "attendance" }
                     )
+                }
+                "settings" -> {
+                    SettingsScreen(onBack = { currentScreen = "login" })
                 }
             }
         }
