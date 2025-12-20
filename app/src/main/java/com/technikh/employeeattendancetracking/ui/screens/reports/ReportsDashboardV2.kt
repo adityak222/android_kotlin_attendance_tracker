@@ -8,11 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,21 +17,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.Calendar
+import java.util.*
 import java.io.File
 import coil.compose.AsyncImage
 import com.technikh.employeeattendancetracking.data.database.AppDatabase
-import com.technikh.employeeattendancetracking.data.database.entities.DailyAttendance
 import com.technikh.employeeattendancetracking.data.database.entities.DayOfficeHours
 import com.technikh.employeeattendancetracking.data.database.entities.AttendanceRecord
+import com.technikh.employeeattendancetracking.utils.CsvUtils
+import com.technikh.employeeattendancetracking.utils.SettingsManager
 import com.technikh.employeeattendancetracking.viewmodel.AttendanceViewModelV2
-import com.technikh.employeeattendancetracking.utils.CsvUtils // <--- CSV Feature
 import com.patrykandpatrick.vico.compose.chart.Chart
 import com.patrykandpatrick.vico.compose.chart.column.columnChart
 import com.patrykandpatrick.vico.core.entry.ChartEntryModelProducer
@@ -49,10 +44,9 @@ fun ReportsDashboardV2(
 ) {
     val context = LocalContext.current
     val database = AppDatabase.getDatabase(context)
+    val settingsManager = remember { SettingsManager(context) }
 
-    BackHandler {
-        onBack()
-    }
+    BackHandler { onBack() }
 
     val viewModel: AttendanceViewModelV2 = viewModel(
         factory = AttendanceViewModelV2.Factory(
@@ -62,54 +56,78 @@ fun ReportsDashboardV2(
         )
     )
 
-    LaunchedEffect(employeeId) {
-        viewModel.loadDashboardData(employeeId)
-    }
+    LaunchedEffect(employeeId) { viewModel.loadDashboardData(employeeId) }
 
-    val dailyReportsState = viewModel.dailyReports.collectAsState(initial = emptyList())
-    val monthlyReportState = viewModel.monthlyReport.collectAsState(initial = emptyList())
+    // --- DATA STATES ---
+    val currentDayRecords by viewModel.currentDayRecords.collectAsState(initial = emptyList())
+    val currentMonthRecords by viewModel.currentMonthRecords.collectAsState(initial = emptyList())
+    val monthlyReportState by viewModel.monthlyReport.collectAsState(initial = emptyList())
 
-
+    // --- TEXT STATES ---
+    val currentDateText by viewModel.currentDateText.collectAsState()
     val currentMonthText by viewModel.currentMonthText.collectAsState()
     val employeeName by viewModel.currentEmployeeName.collectAsState()
 
+    // --- TAB STATE ---
+    var selectedTab by remember { mutableIntStateOf(0) }
 
+    // --- SELFIE PRIVACY STATES ---
+    var areSelfiesVisible by remember { mutableStateOf(false) } // Default Hidden
+    var showAuthDialog by remember { mutableStateOf(false) }
+    var adminPasswordInput by remember { mutableStateOf("") }
+    var isAuthError by remember { mutableStateOf(false) }
+
+    // --- CALENDAR DIALOG ---
     val calendar = Calendar.getInstance()
     val datePickerDialog = DatePickerDialog(
         context,
         { _: DatePicker, year: Int, month: Int, day: Int ->
-            val newDate = Calendar.getInstance()
-            newDate.set(year, month, day)
+            val newDate = Calendar.getInstance(); newDate.set(year, month, day)
             viewModel.setDate(newDate.timeInMillis)
         },
-        calendar.get(Calendar.YEAR),
-        calendar.get(Calendar.MONTH),
-        calendar.get(Calendar.DAY_OF_MONTH)
+        calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)
     )
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Attendance Reports") },
+                title = { Text("Reports") },
                 actions = {
+                    // --- 1. TOGGLE SELFIE BUTTON ---
                     IconButton(onClick = {
-
-                        val allRecords = dailyReportsState.value.flatMap { it.records }
-                        if (allRecords.isNotEmpty()) {
-                            CsvUtils.generateAndShareCsv(context, employeeName, allRecords)
+                        if (areSelfiesVisible) {
+                            areSelfiesVisible = false // Hide immediately
+                        } else {
+                            // Show Password Dialog to Unlock
+                            adminPasswordInput = ""
+                            isAuthError = false
+                            showAuthDialog = true
                         }
                     }) {
-                        Icon(Icons.Default.Share, contentDescription = "Export CSV")
+                        // FIXED: Replaced 'Visibility' with 'Face' (Show) and 'Lock' (Hide)
+                        Icon(
+                            imageVector = if (areSelfiesVisible) Icons.Default.Face else Icons.Default.Lock,
+                            contentDescription = "Toggle Selfies",
+                            tint = if (areSelfiesVisible) MaterialTheme.colorScheme.primary else Color.Gray
+                        )
+                    }
+
+                    // --- 2. EXPORT CSV BUTTON ---
+                    IconButton(onClick = {
+                        if (currentMonthRecords.isNotEmpty()) {
+                            CsvUtils.generateAndShareCsv(context, employeeName, currentMonthRecords)
+                        }
+                    }) {
+                        Icon(Icons.Default.Share, contentDescription = "Export Month CSV")
                     }
                 }
             )
         }
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-
             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
 
-
+                // --- NAVIGATION HEADER ---
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -119,28 +137,25 @@ fun ReportsDashboardV2(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    IconButton(onClick = { viewModel.changeMonth(-1) }) {
-                        Icon(Icons.Default.KeyboardArrowLeft, "Previous")
-                    }
+                    IconButton(onClick = {
+                        if (selectedTab == 0) viewModel.incrementDay(-1) else viewModel.incrementMonth(-1)
+                    }) { Icon(Icons.Default.KeyboardArrowLeft, "Prev") }
 
                     Text(
-                        text = currentMonthText,
+                        text = if (selectedTab == 0) currentDateText else currentMonthText,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
 
                     Row {
-                        IconButton(onClick = { viewModel.changeMonth(1) }) {
-                            Icon(Icons.Default.KeyboardArrowRight, "Next")
-                        }
-                        IconButton(onClick = { datePickerDialog.show() }) {
-                            Icon(Icons.Default.DateRange, "Select Date")
-                        }
+                        IconButton(onClick = {
+                            if (selectedTab == 0) viewModel.incrementDay(1) else viewModel.incrementMonth(1)
+                        }) { Icon(Icons.Default.KeyboardArrowRight, "Next") }
+                        IconButton(onClick = { datePickerDialog.show() }) { Icon(Icons.Default.DateRange, "Select Date") }
                     }
                 }
 
-                // --- EXISTING TABS ---
-                var selectedTab by remember { mutableIntStateOf(0) }
+                // --- TABS ---
                 TabRow(selectedTabIndex = selectedTab) {
                     listOf("Daily Report", "Monthly Chart").forEachIndexed { index, title ->
                         Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) })
@@ -148,103 +163,125 @@ fun ReportsDashboardV2(
                 }
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // --- VIEW CONTENT ---
                 when (selectedTab) {
-                    0 -> DailyReportViewV2(dailyReportsState.value)
-                    1 -> MonthlyReportViewV2(monthlyReportState.value)
+                    0 -> DailySingleDayView(currentDayRecords, areSelfiesVisible)
+                    1 -> MonthlyReportViewV2(monthlyReportState)
                 }
             }
 
             FloatingActionButton(
                 onClick = onBack,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(16.dp),
+                modifier = Modifier.align(Alignment.BottomStart).padding(16.dp),
                 containerColor = MaterialTheme.colorScheme.secondaryContainer
-            ) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-            }
+            ) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
+        }
+
+        // --- PASSWORD DIALOG ---
+        if (showAuthDialog) {
+            AlertDialog(
+                onDismissRequest = { showAuthDialog = false },
+                title = { Text("Admin Access Required") },
+                text = {
+                    Column {
+                        Text("Enter Admin Password to view selfies:")
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = adminPasswordInput,
+                            onValueChange = { adminPasswordInput = it; isAuthError = false },
+                            visualTransformation = PasswordVisualTransformation(),
+                            isError = isAuthError,
+                            singleLine = true,
+                            label = { Text("Password") }
+                        )
+                        if (isAuthError) {
+                            Text("Incorrect Password", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        if (adminPasswordInput == settingsManager.adminPassword) {
+                            areSelfiesVisible = true
+                            showAuthDialog = false
+                        } else {
+                            isAuthError = true
+                        }
+                    }) { Text("Unlock") }
+                },
+                dismissButton = { Button(onClick = { showAuthDialog = false }) { Text("Cancel") } }
+            )
         }
     }
 }
 
-
-
+// --- UPDATED DAILY VIEW (Accepts showSelfies param) ---
 @Composable
-fun DailyReportViewV2(reports: List<DailyAttendance>) {
-    if (reports.isEmpty()) {
+fun DailySingleDayView(records: List<AttendanceRecord>, showSelfies: Boolean) {
+    if (records.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No daily records for this period.")
+            Text("No records for this date.")
         }
         return
     }
+
     LazyColumn {
-        items(reports) { daily ->
+        items(records) { record ->
             Card(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                elevation = CardDefaults.cardElevation(4.dp)
+                elevation = CardDefaults.cardElevation(2.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = daily.date, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+                        Text(
+                            text = timeFormat.format(Date(record.timestamp)),
+                            color = if (record.punchType == "IN") Color(0xFF4CAF50) else Color(0xFFF44336),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                        Text(record.punchType, fontWeight = FontWeight.SemiBold)
 
-                    daily.records.forEach { record ->
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                        ) {
+                        if (record.punchType == "OUT") {
+                            val displayText = if (record.isOfficeWork && !record.workReason.isNullOrBlank())
+                                "${record.reason}: ${record.workReason}"
+                            else record.reason
 
-                            Column(modifier = Modifier.weight(1f)) {
-                                val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-                                Text(
-                                    text = timeFormat.format(Date(record.timestamp)),
-                                    color = if (record.punchType == "IN") Color(0xFF4CAF50) else Color(0xFFF44336),
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(record.punchType, fontWeight = FontWeight.SemiBold)
-
-                                if (record.punchType == "OUT") {
-                                    val displayText = if (record.isOfficeWork && !record.workReason.isNullOrBlank()) {
-                                        "${record.reason}: ${record.workReason}"
-                                    } else {
-                                        record.reason
-                                    }
-
-                                    if (!displayText.isNullOrBlank()) {
-                                        Text(
-                                            text = displayText,
-                                            fontStyle = FontStyle.Italic,
-                                            fontSize = 13.sp,
-                                            color = Color.Gray
-                                        )
-                                    }
-                                }
-                            }
-
-                            if (record.selfiePath != null) {
-                                Card(
-                                    modifier = Modifier.size(60.dp),
-                                    shape = MaterialTheme.shapes.small,
-                                    elevation = CardDefaults.cardElevation(2.dp)
-                                ) {
-                                    AsyncImage(
-                                        model = File(record.selfiePath),
-                                        contentDescription = "Verification Selfie",
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                }
+                            if (!displayText.isNullOrBlank()) {
+                                Text(text = displayText, fontStyle = FontStyle.Italic, fontSize = 14.sp, color = Color.Gray)
                             }
                         }
-                        Divider()
                     }
-                    val totalHours = calculateDailyHoursLocalV2(daily.records)
-                    if (totalHours > 0.0) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Total: ${"%.2f".format(totalHours)} hours",
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+
+                    // --- CONDITIONALLY SHOW SELFIE ---
+                    if (showSelfies && record.selfiePath != null) {
+                        Card(
+                            modifier = Modifier.size(60.dp),
+                            shape = MaterialTheme.shapes.small,
+                            elevation = CardDefaults.cardElevation(2.dp)
+                        ) {
+                            AsyncImage(model = File(record.selfiePath), contentDescription = "Selfie", modifier = Modifier.fillMaxSize())
+                        }
                     }
+                }
+            }
+        }
+
+        // Daily Total Calculation
+        item {
+            val totalHours = calculateDailyHoursLocalV2(records)
+            if (totalHours > 0.0) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                    Text(
+                        text = "Total Hours: ${"%.2f".format(totalHours)}",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(16.dp)
+                    )
                 }
             }
         }

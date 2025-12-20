@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface AttendanceDao {
+    @Query("SELECT * FROM attendance_records ORDER BY timestamp DESC")
+    suspend fun getAllRecordsList(): List<AttendanceRecord>
+
     @Query("SELECT * FROM attendance_records WHERE employeeId = :empId ORDER BY timestamp DESC LIMIT 1")
     fun getLastRecordFlow(empId: String): Flow<AttendanceRecord?>
 

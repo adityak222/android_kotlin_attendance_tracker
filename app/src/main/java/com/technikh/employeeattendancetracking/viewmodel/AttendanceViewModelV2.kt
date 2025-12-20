@@ -3,23 +3,12 @@ package com.technikh.employeeattendancetracking.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.Calendar
-
-import com.technikh.employeeattendancetracking.data.database.daos.AttendanceDao
-import com.technikh.employeeattendancetracking.data.database.daos.WorkReasonDao
-import com.technikh.employeeattendancetracking.data.database.daos.EmployeeDao
-import com.technikh.employeeattendancetracking.data.database.entities.AttendanceRecord
-import com.technikh.employeeattendancetracking.data.database.entities.DailyAttendance
-import com.technikh.employeeattendancetracking.data.database.entities.DayOfficeHours
-import com.technikh.employeeattendancetracking.data.database.entities.OfficeWorkReason
-import com.technikh.employeeattendancetracking.data.database.entities.Employee
+import java.util.*
+import com.technikh.employeeattendancetracking.data.database.daos.*
+import com.technikh.employeeattendancetracking.data.database.entities.*
 
 class AttendanceViewModelV2(
     private val attendanceDao: AttendanceDao,
@@ -27,7 +16,7 @@ class AttendanceViewModelV2(
     private val employeeDao: EmployeeDao
 ) : ViewModel() {
 
-
+    // --- HOME SCREEN FEATURES ---
 
     // Live Timeline (Bottom half of Home Screen)
     val todayTimeline = attendanceDao.getTodayAttendance(getStartOfDay())
@@ -45,40 +34,64 @@ class AttendanceViewModelV2(
     val currentEmployeeName = _currentEmployeeName.asStateFlow()
 
 
+    // --- REPORTING FEATURES ---
 
-    // Selected Date for filtering (Defaults to Today)
-    private val _selectedMonth = MutableStateFlow(Calendar.getInstance())
+    // 1. The Single Source of Truth for "Selected Time" (Used for both Day and Month views)
+    private val _selectedDate = MutableStateFlow(Calendar.getInstance())
 
-    // Formatted Month Text (e.g. "December 2025") for UI
-    val currentMonthText = _selectedMonth.map { cal ->
+    // 2. Formatted Strings for UI Headers
+
+    // For Daily View Header: "20 December 2025"
+    val currentDateText = _selectedDate.map { cal ->
+        SimpleDateFormat("dd MMMM yyyy", Locale.getDefault()).format(cal.time)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    // For Monthly View Header: "December 2025"
+    val currentMonthText = _selectedDate.map { cal ->
         SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(cal.time)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
-
+    // 3. Raw Records for the Employee (Fetched from DB)
     private val _allRecords = MutableStateFlow<List<AttendanceRecord>>(emptyList())
 
-    // Filtered Daily Reports (Reacts to _selectedMonth changes)
-    val dailyReports = combine(_allRecords, _selectedMonth) { records, cal ->
+    // 4. DAILY REPORT: Filters records to show ONLY the selected Day
+    val currentDayRecords = combine(_allRecords, _selectedDate) { records, cal ->
+        val targetDay = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
+        records.filter {
+            val recordDay = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(it.timestamp))
+            recordDay == targetDay
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // 5. CSV EXPORT DATA: Gets ALL records for the selected MONTH (so export remains useful)
+    val currentMonthRecords = combine(_allRecords, _selectedDate) { records, cal ->
+        val targetMonth = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(cal.time)
+        records.filter {
+            val recordMonth = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date(it.timestamp))
+            recordMonth == targetMonth
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // 6. Compatibility Flow (Keeps old code working if referenced)
+    // This replicates the old 'dailyReports' logic but tied to the new _selectedDate
+    val dailyReports = combine(_allRecords, _selectedDate) { records, cal ->
         val selectedMonthStr = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(cal.time)
-
-
         val filtered = records.filter {
             val recordMonth = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date(it.timestamp))
             recordMonth == selectedMonthStr
         }
-
-        // Group by Date
         filtered.groupBy {
             SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(it.timestamp))
         }.map { (date, dailyRecs) -> DailyAttendance(date, dailyRecs) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-
+    // 7. Monthly Chart Data
     private val _monthlyReport = MutableStateFlow<List<DayOfficeHours>>(emptyList())
     val monthlyReport = _monthlyReport.asStateFlow()
 
     private var activeEmployeeId: String? = null
 
+    // --- WORK REASONS ---
     private val _workReasonSuggestions = MutableStateFlow<List<String>>(emptyList())
     val workReasonSuggestions = _workReasonSuggestions.asStateFlow()
 
@@ -88,21 +101,7 @@ class AttendanceViewModelV2(
         }
     }
 
-
-
-
-    fun registerEmployee(name: String, id: String, password: String) {
-        viewModelScope.launch {
-            val newEmployee = Employee(name = name, employeeId = id, password = password)
-            employeeDao.insertEmployee(newEmployee)
-        }
-    }
-
-
-    fun getLiveStatus(employeeId: String): Flow<AttendanceRecord?> {
-        return attendanceDao.getLastRecordFlow(employeeId)
-    }
-
+    // --- ACTIONS ---
 
     fun loadDashboardData(employeeId: String) {
         viewModelScope.launch {
@@ -110,31 +109,46 @@ class AttendanceViewModelV2(
             val emp = employeeDao.getEmployeeById(employeeId)
             _currentEmployeeName.value = emp?.name ?: "Unknown"
 
-
+            // Update Punch Button Status
             val lastRecord = attendanceDao.getLastRecord(employeeId)
             _isPunchedIn.value = lastRecord?.punchType == "IN"
 
-
+            // Fetch All Records
             val all = attendanceDao.getAttendanceByEmployee(employeeId)
             _allRecords.value = all
-
 
             refreshMonthlyChart()
         }
     }
 
+    // --- NAVIGATION ACTIONS ---
 
-    fun changeMonth(monthsToAdd: Int) {
-        val current = _selectedMonth.value.clone() as Calendar
-        current.add(Calendar.MONTH, monthsToAdd)
-        _selectedMonth.value = current
+    // Move Day by Day (For Daily Report Tab)
+    fun incrementDay(amount: Int) {
+        val current = _selectedDate.value.clone() as Calendar
+        current.add(Calendar.DAY_OF_YEAR, amount)
+        _selectedDate.value = current
         refreshMonthlyChart()
     }
 
+    // Move Month by Month (For Monthly Chart Tab)
+    fun incrementMonth(amount: Int) {
+        val current = _selectedDate.value.clone() as Calendar
+        current.add(Calendar.MONTH, amount)
+        _selectedDate.value = current
+        refreshMonthlyChart()
+    }
+
+    // Helper for backward compatibility with old 'changeMonth' calls
+    fun changeMonth(monthsToAdd: Int) {
+        incrementMonth(monthsToAdd)
+    }
+
+    // Set Specific Date from DatePicker
     fun setDate(timestamp: Long) {
         val cal = Calendar.getInstance()
         cal.timeInMillis = timestamp
-        _selectedMonth.value = cal
+        _selectedDate.value = cal
         refreshMonthlyChart()
     }
 
@@ -142,22 +156,27 @@ class AttendanceViewModelV2(
         activeEmployeeId?.let { id ->
             viewModelScope.launch {
                 val format = SimpleDateFormat("yyyy-MM", Locale.getDefault())
-                val monthStr = format.format(_selectedMonth.value.time)
+                val monthStr = format.format(_selectedDate.value.time)
                 _monthlyReport.value = attendanceDao.getMonthlyOfficeHours(id, monthStr)
             }
         }
     }
 
+    // --- STANDARD PUNCH ACTIONS ---
+
+    fun registerEmployee(name: String, id: String, password: String) {
+        viewModelScope.launch {
+            employeeDao.insertEmployee(Employee(name = name, employeeId = id, password = password))
+        }
+    }
+
+    fun getLiveStatus(employeeId: String): Flow<AttendanceRecord?> {
+        return attendanceDao.getLastRecordFlow(employeeId)
+    }
 
     fun punchIn(employeeId: String, selfiePath: String?) {
         viewModelScope.launch {
-            val record = AttendanceRecord(
-                employeeId = employeeId,
-                punchType = "IN",
-                timestamp = System.currentTimeMillis(),
-                selfiePath = selfiePath
-            )
-            attendanceDao.insert(record)
+            attendanceDao.insert(AttendanceRecord(employeeId = employeeId, punchType = "IN", timestamp = System.currentTimeMillis(), selfiePath = selfiePath))
             _isPunchedIn.value = true
             loadDashboardData(employeeId)
         }
@@ -165,20 +184,8 @@ class AttendanceViewModelV2(
 
     fun punchOut(employeeId: String, reason: String, isOfficeWork: Boolean, workReason: String?, selfiePath: String?) {
         viewModelScope.launch {
-            attendanceDao.insert(AttendanceRecord(
-                employeeId = employeeId,
-                punchType = "OUT",
-                timestamp = System.currentTimeMillis(),
-                reason = reason,
-                isOfficeWork = isOfficeWork,
-                workReason = workReason,
-                selfiePath = selfiePath
-            ))
-
-            if (isOfficeWork && !workReason.isNullOrBlank()) {
-                saveNewReason(workReason)
-            }
-
+            attendanceDao.insert(AttendanceRecord(employeeId = employeeId, punchType = "OUT", timestamp = System.currentTimeMillis(), reason = reason, isOfficeWork = isOfficeWork, workReason = workReason, selfiePath = selfiePath))
+            if (isOfficeWork && !workReason.isNullOrBlank()) saveNewReason(workReason)
             _isPunchedIn.value = false
             loadDashboardData(employeeId)
         }
@@ -186,44 +193,23 @@ class AttendanceViewModelV2(
 
     fun searchReasons(query: String) {
         viewModelScope.launch {
-            if (query.isBlank()) {
-                _workReasonSuggestions.value = emptyList()
-            } else {
-                val reasons = workReasonDao.searchReasons("%$query%")
-                _workReasonSuggestions.value = reasons.map { it.reason }
-            }
+            if (query.isBlank()) _workReasonSuggestions.value = emptyList()
+            else _workReasonSuggestions.value = workReasonDao.searchReasons("%$query%").map { it.reason }
         }
     }
 
     private suspend fun saveNewReason(reasonText: String) {
         val existing = workReasonDao.searchReasons(reasonText)
-        if (existing.isEmpty()) {
-            workReasonDao.insert(OfficeWorkReason(reason = reasonText, usageCount = 1))
-        } else {
-            workReasonDao.incrementUsage(reasonText, System.currentTimeMillis())
-        }
+        if (existing.isEmpty()) workReasonDao.insert(OfficeWorkReason(reason = reasonText, usageCount = 1))
+        else workReasonDao.incrementUsage(reasonText, System.currentTimeMillis())
     }
 
     private fun getStartOfDay(): Long {
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
+        val cal = Calendar.getInstance(); cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
         return cal.timeInMillis
     }
 
-    class Factory(
-        private val attendanceDao: AttendanceDao,
-        private val workReasonDao: WorkReasonDao,
-        private val employeeDao: EmployeeDao
-    ) : ViewModelProvider.Factory {
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            if (modelClass.isAssignableFrom(AttendanceViewModelV2::class.java)) {
-                @Suppress("UNCHECKED_CAST")
-                return AttendanceViewModelV2(attendanceDao, workReasonDao, employeeDao) as T
-            }
-            throw IllegalArgumentException("Unknown ViewModel class")
-        }
+    class Factory(val ad: AttendanceDao, val wd: WorkReasonDao, val ed: EmployeeDao) : ViewModelProvider.Factory {
+        override fun <T : ViewModel> create(modelClass: Class<T>): T = AttendanceViewModelV2(ad, wd, ed) as T
     }
 }
